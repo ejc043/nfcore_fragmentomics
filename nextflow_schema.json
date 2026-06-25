@@ -62,7 +62,37 @@
                     "mimetype": "text/plain",
                     "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
                     "description": "Path to FASTA genome file.",
-                    "help_text": "This parameter is *mandatory* if `--genome` is not specified. If you don't have a BWA index available this will be generated for you automatically. Combine with `--save_reference` to save BWA index for future runs.",
+                    "help_text": "Required (unless supplied via `--genome`). Used for alignment, MarkDuplicates and QC.",
+                    "fa_icon": "far fa-file-code"
+                },
+                "fasta_fai": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "pattern": "^\\S+\\.fai$",
+                    "description": "Path to the FASTA index (.fai). Used by MarkDuplicates, samtools stats and to build DELFI windows.",
+                    "fa_icon": "far fa-file-code"
+                },
+                "bwamem2_index": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "exists": true,
+                    "description": "Path to the directory containing the bwa-mem2 index files (*.amb, *.ann, *.bwt.2bit.64, *.pac, *.0123).",
+                    "fa_icon": "fas fa-folder-open"
+                },
+                "genome_2bit": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "pattern": "^\\S+\\.2bit$",
+                    "description": "Path to the genome .2bit file. Required by finaletoolkit end-motifs and DELFI.",
+                    "fa_icon": "far fa-file-code"
+                },
+                "gap_file": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Path to the assembly gaps BED file (e.g. gaps.GRCh38.bed). Required by finaletoolkit DELFI.",
                     "fa_icon": "far fa-file-code"
                 },
                 "igenomes_ignore": {
@@ -78,6 +108,56 @@
                     "fa_icon": "fas fa-ban",
                     "hidden": true,
                     "default": "s3://ngi-igenomes/igenomes/"
+                }
+            }
+        },
+        "fragmentomics_options": {
+            "title": "Fragmentomics options",
+            "type": "object",
+            "fa_icon": "fas fa-dna",
+            "description": "Options for BAM filtering and finaletoolkit feature extraction.",
+            "properties": {
+                "filter_min_mapq": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Minimum MAPQ kept when filtering the BAM before finaletoolkit.",
+                    "fa_icon": "fas fa-filter"
+                },
+                "filter_max_softclip_pct": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Drop reads whose soft-clipped fraction is at or above this percentage of the read length.",
+                    "fa_icon": "fas fa-filter"
+                },
+                "intervals_window_size": {
+                    "type": "integer",
+                    "default": 100000,
+                    "description": "Window size (bp) used to build the DELFI bins BED with bedtools makewindows.",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "delfi_window_size": {
+                    "type": "integer",
+                    "default": 5000000,
+                    "description": "finaletoolkit DELFI --window-size (bp).",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "delfi_min_frag_size": {
+                    "type": "integer",
+                    "default": 25,
+                    "description": "finaletoolkit DELFI minimum fragment size (-m).",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "delfi_short": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "finaletoolkit DELFI short fragment threshold (-sh).",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "delfi_long": {
+                    "type": "integer",
+                    "default": 250,
+                    "description": "finaletoolkit DELFI long fragment threshold (-l).",
+                    "fa_icon": "fas fa-ruler-horizontal"
                 }
             }
         },
@@ -238,6 +318,9 @@
         },
         {
             "$ref": "#/$defs/reference_genome_options"
+        },
+        {
+            "$ref": "#/$defs/fragmentomics_options"
         },
         {
             "$ref": "#/$defs/institutional_config_options"

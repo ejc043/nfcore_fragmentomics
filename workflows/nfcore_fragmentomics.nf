@@ -4,7 +4,13 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { FASTQC                 } from '../modules/nf-core/fastqc/main'
+include { FASTP                  } from '../modules/nf-core/fastp/main'
+include { BWAMEM2_MEM            } from '../modules/nf-core/bwamem2/mem/main'
+include { GATK4_MARKDUPLICATES   } from '../modules/nf-core/gatk4/markduplicates/main'
+include { SAMTOOLS_STATS         } from '../modules/nf-core/samtools/stats/main'
+include { MOSDEPTH               } from '../modules/nf-core/mosdepth/main'
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
+include { FRAGMENTOMICS          } from '../subworkflows/local/fragmentomics/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
@@ -29,11 +35,92 @@ workflow NFCORE_FRAGMENTOMICS {
 
     def ch_versions = channel.empty()
     def ch_multiqc_files = channel.empty()
+
     //
-    // MODULE: Run FastQC
+    // Reference channels (required parameters, no defaults)
+    //
+    def ch_fasta = channel.value([[id: 'fasta'], file(params.fasta, checkIfExists: true)])
+    def ch_fai = channel.value([[id: 'genome'], file(params.fasta_fai, checkIfExists: true)])
+    def ch_bwamem2_index = channel.value([[id: 'bwamem2_index'], file(params.bwamem2_index, checkIfExists: true)])
+    def ch_genome_2bit = channel.value(file(params.genome_2bit, checkIfExists: true))
+    def ch_gap_file = channel.value(file(params.gap_file, checkIfExists: true))
+
+    //
+    // MODULE: Run FastQC on raw reads
     //
     FASTQC(ch_samplesheet)
-    ch_multiqc_files = ch_multiqc_files.mix(FASTQC.out.zip.map{ _meta, file -> file })
+    ch_multiqc_files = ch_multiqc_files.mix(FASTQC.out.zip.map { _meta, file -> file })
+
+    //
+    // MODULE: Adapter / quality trimming with fastp
+    //
+    FASTP(
+        ch_samplesheet.map { meta, reads -> [meta, reads, []] },
+        false, // discard_trimmed_pass
+        false, // save_trimmed_fail
+        false, // save_merged
+    )
+    ch_multiqc_files = ch_multiqc_files.mix(FASTP.out.json.map { _meta, file -> file })
+
+    //
+    // MODULE: Align trimmed reads with bwa-mem2 (coordinate-sorted BAM)
+    //
+    BWAMEM2_MEM(
+        FASTP.out.reads,
+        ch_bwamem2_index,
+        ch_fasta,
+        true, // sort_bam
+    )
+
+    //
+    // MODULE: Mark duplicates (duplicates flagged, not removed)
+    //
+    GATK4_MARKDUPLICATES(
+        BWAMEM2_MEM.out.bam,
+        ch_fasta.map { _meta, fasta -> fasta },
+        ch_fai.map { _meta, fai -> fai },
+    )
+    ch_multiqc_files = ch_multiqc_files.mix(GATK4_MARKDUPLICATES.out.metrics.map { _meta, file -> file })
+
+    def ch_markdup_bam = GATK4_MARKDUPLICATES.out.bam.join(GATK4_MARKDUPLICATES.out.bai)
+
+    //
+    // SUBWORKFLOW: Filter BAM + fragmentomic feature matrices (finaletoolkit)
+    //
+    FRAGMENTOMICS(
+        ch_markdup_bam,
+        ch_fai,
+        ch_genome_2bit,
+        ch_gap_file,
+    )
+
+    //
+    // QC on BOTH the mark-duplicated and the finaletoolkit-filtered BAMs.
+    // Tag the meta id so outputs from the two stages don't collide.
+    //
+    def ch_qc_md = ch_markdup_bam.map { meta, bam, bai -> [meta + [id: "${meta.id}.markdup"], bam, bai] }
+    def ch_qc_filtered = FRAGMENTOMICS.out.filtered_bam.map { meta, bam, bai -> [meta + [id: "${meta.id}.filtered"], bam, bai] }
+    def ch_qc_bams = ch_qc_md.mix(ch_qc_filtered)
+
+    //
+    // MODULE: samtools stats
+    //
+    SAMTOOLS_STATS(
+        ch_qc_bams,
+        ch_fasta.map { _meta, fasta -> [[id: 'fasta'], fasta, file(params.fasta_fai)] },
+    )
+    ch_multiqc_files = ch_multiqc_files.mix(SAMTOOLS_STATS.out.stats.map { _meta, file -> file })
+
+    //
+    // MODULE: mosdepth (whole-genome coverage, no interval BED)
+    //
+    MOSDEPTH(
+        ch_qc_bams.map { meta, bam, bai -> [meta, bam, bai, []] },
+        ch_fasta,
+        [],
+    )
+    ch_multiqc_files = ch_multiqc_files.mix(MOSDEPTH.out.summary_txt.map { _meta, file -> file })
+    ch_multiqc_files = ch_multiqc_files.mix(MOSDEPTH.out.global_txt.map { _meta, file -> file })
 
     //
     // Collate and save software versions
